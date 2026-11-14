@@ -1,0 +1,8 @@
+{
+  "repository": "zomco/mmwave-component",
+  "revision": "5c8826597a8d9c5f31eadf1bb91478e0c1bb5ce1",
+  "runtimeContracts": [
+    "docs/protocol/schema/mwcp-v1.schema.json",
+    "docs/protocol/fixtures/r60abd1-capabilities.json"
+  ]
+}

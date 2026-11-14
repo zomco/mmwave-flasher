@@ -1,0 +1,71 @@
+name: Publish GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Record website checkout and component pin
+        id: component
+        run: |
+          git rev-parse HEAD
+          echo "revision=$(python3 -c 'import json; print(json.load(open("component-pin.json"))["revision"])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: zomco/mmwave-component
+          ref: ${{ steps.component.outputs.revision }}
+          path: .component
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: static/package-lock.json
+      - run: python3 scripts/check_contract.py
+      - run: python3 -m unittest discover -s tests -v
+      - run: sudo apt-get update && sudo apt-get install -y g++
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+      - name: Test and build installer
+        working-directory: static
+        env:
+          MWCP_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+          MWCP_CI_SANDBOX_FALLBACK: '1'
+          MWCP_GPP: g++
+        run: |
+          npm ci
+          npm run test:unit
+          npm run test:browser
+          npm run build
+      - name: Assemble published component firmware (no compilation)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/assemble.py zomco/mmwave-component static/dist
+      - name: Record published source
+        run: |
+          python3 -c 'import json,os; from pathlib import Path; Path("static/dist/build-info.json").write_text(json.dumps({"repository":os.environ["GITHUB_REPOSITORY"],"commit":os.environ["GITHUB_SHA"],"firmwareRepository":"zomco/mmwave-component","componentPin":json.load(open("component-pin.json"))["revision"]})+"\n")'
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: static/dist
+      - uses: actions/deploy-pages@v5
+        id: deploy

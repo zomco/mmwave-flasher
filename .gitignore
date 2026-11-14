@@ -1,0 +1,6 @@
+.component/
+__pycache__/
+*.py[cod]
+.venv/
+static/models.json
+static/*.pdf
