@@ -1,8 +1,5 @@
-# Flasher maintenance
+# Workspace development entry point
 
-- This repository owns the website and Web Serial host UI. Firmware implementations and releases belong to mmwave-component.
-- Read README.md and docs/architecture/0001-independent-flasher.md before changing repository boundaries. Follow docs/PUBLISHING.md for deployments.
-- Accept core user paths and data/configuration safety. Defer exhaustive matrices, optional diagnostics, BLE and long hardware tests; do not recreate historic G2 gates.
-- Do not operate hardware, Home Assistant, publish releases or deploy Pages without separate authorization.
-- component-pin.json identifies the read-only integration dependency. Keep runtime contract snapshots byte-identical to that revision; test pin changes. Never edit .component/ as product source.
-- Historical reports retain original paths and conclusions; do not bulk rewrite evidence.
+AI development, testing and maintenance guidance is maintained in [mmwave-workspace](https://github.com/zomco/mmwave-workspace/blob/main/docs/development/repositories/mmwave-flasher.md).
+
+Inside the workspace, read its root AGENTS.md, `docs/development/repositories/mmwave-flasher.md` and `docs/development/README.md` before edits. Skills live in the workspace's `.agents/skills/`; run `python scripts/dev.py list` from the workspace. This file is a routing stub: do not add local rules or duplicate Skills here. A standalone checkout retains its public README and CI; obtain the workspace for internal maintenance guidance instead of guessing its contents.

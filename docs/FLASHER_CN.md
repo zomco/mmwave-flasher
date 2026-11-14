@@ -47,6 +47,8 @@ npm run dev
 
 ## 本地候选构建：运行目录与源码身份
 
+维护工具已统一迁入 mmwave-workspace。以下命令在**工作区根目录**运行，不在 flasher 或 component 根目录运行；完整入口见 [工作区维护指南](https://github.com/zomco/mmwave-workspace/blob/main/docs/development/README.md)。source-state.json 的 git/sourceCommit 对应组件源码，新增 workspaceToolGit 与 @workspace/ 输入记录构建工具身份。
+
 `scripts/build_r60_candidate.py` 是维护者的离线演练工具。每次运行必须使用独立的 `--data-dir` 和 `--output`；当输出目录已包含上一次运行的 `artifact-summary.json`、日志、盖章配置或候选固件时，工具拒绝启动，且从不删除任何文件。
 
 ```sh

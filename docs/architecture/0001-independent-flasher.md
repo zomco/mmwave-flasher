@@ -33,3 +33,7 @@
 - tools/g2 是固件硬件回归工具，仍属组件。其 JS 帧校验器迁入 flasher/tools/g2；旧入口需要显式 MMWAVE_FLASHER_ROOT，以免误用过期的网页校验器。
 - 普通开发、网页构建不要求 sibling checkout；完整回归增加一个固定的只读依赖。刷新 pin 需要维护者同步快照和回归，避免新固件悄悄改变旧网页测试基线。
 - 域名与 Pages 所有权是部署操作，不能随文件移动自动完成。切换、回滚和验收见 PUBLISHING.md。
+
+## 后续维护边界（2026-11-14）
+
+工作区集中管理维护能力后，上表的本地候选预览与 tools/g2 归属已由 [工作区 ADR](https://github.com/zomco/mmwave-workspace/blob/main/docs/development/0001-centralized-maintenance.md) 更新：候选预览和完整 G2 工具位于 mmwave-workspace，包含 JS 帧校验器。网页产品代码及独立 CI/发布依赖继续留在 flasher。上文作为迁移当时的决定保留，不再作为 G2 当前命令入口。

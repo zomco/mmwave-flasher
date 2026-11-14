@@ -45,6 +45,8 @@ Build directories are not public URL names. The [build-action v7 entrypoint](htt
 
 ## Local candidate builds: run directories and source identity
 
+Maintenance tools now live in mmwave-workspace. Run the following commands from the **workspace root**, not the flasher or component root; see the [workspace maintenance guide](https://github.com/zomco/mmwave-workspace/blob/main/docs/development/README.md). source-state.json keeps component git/sourceCommit identity separate from workspaceToolGit and @workspace/ tool inputs.
+
 `scripts/build_r60_candidate.py` is the maintainer's offline rehearsal tool. Each run must get its own `--data-dir` and `--output`; the tool refuses to start when the output already contains a previous run's `artifact-summary.json`, logs, stamped config, or candidate firmware, and it never deletes anything.
 
 ```sh

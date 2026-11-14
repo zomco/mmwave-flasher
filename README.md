@@ -4,6 +4,8 @@
 
 ## 开发
 
+项目日常开发统一在 [mmwave-workspace](https://github.com/zomco/mmwave-workspace/blob/main/docs/development/README.md) 进行；Skill、内部维护指南、G2 和本地候选预览工具在那里维护。下列命令保留独立检出/CI 的可复现能力，工作区通过统一入口调用同一套实现。
+
 要求 Node.js 24、npm。网页构建不需要组件仓库、HA 或设备：
 
 ```sh
