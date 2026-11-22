@@ -44,6 +44,7 @@ test('browser page clicks config and shows stale data on the simulated console',
     const page = await waitPage(debugPort, 5000);
     socket = connectCdp(page.webSocketDebuggerUrl, { openTimeoutMs: 3000, commandTimeoutMs: 1000 });
     await socket.send('Runtime.enable');
+    await socket.send('Emulation.setDeviceMetricsOverride', {width:1280,height:1100,deviceScaleFactor:1,mobile:false});
     try {
       await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: '连接设备' });
     } catch (error) {
@@ -58,27 +59,33 @@ test('browser page clicks config and shows stale data on the simulated console',
       scene: !!document.querySelector('[data-testid="radar-scene"]'),
       text: document.body.innerText,
     })`);
-    assert.deepEqual(empty.tabs, ['实时数据','配置']);
+    assert.deepEqual(empty.tabs, ['实时数据','配置','诊断']);
     assert.equal(empty.scene, false);
     assert.doesNotMatch(empty.text, /无体征|configured_model|当前承诺的真机组合/);
-    assert.match(empty.text, /连接层/);
+    assert.match(empty.text, /串口层/);
     assert.match(empty.text, /协议层/);
-    assert.match(empty.text, /应用层/);
+    assert.match(empty.text, /主控层/);
+    assert.match(empty.text, /雷达层/);
     await click(socket, '配置');
     await click(socket, '连接设备');
     const connected = await waitForText(socket, { timeoutMs: 5000, commandTimeoutMs: 1000, match: '模拟模式' });
-    assert.match(connected, /r60abd1/);
+    assert.match(connected, /MWCP 1\.0/);
     assert.doesNotMatch(connected, /烧录成功/);
     await waitForText(socket, {timeoutMs:5000, commandTimeoutMs:1000, match:'观测记录与导出'});
     assert.equal(await evaluate(socket, `document.querySelector('[role="tab"][aria-selected="true"]').textContent`), '实时数据');
     assert.equal(await evaluate(socket, `!!document.querySelector('[data-testid="coverage-fan"]') && !!document.querySelector('[data-testid="radar-origin"]')`), true);
-    await evaluate(socket, `document.querySelector('label.check-row input[type="checkbox"]').click()`);
     await click(socket, '诊断');
     assert.match(await evaluate(socket, 'document.body.innerText'), /自本次启动起的毫秒数/);
-    await evaluate(socket, `document.querySelector('label.check-row input[type="checkbox"]').click()`);
+    await click(socket, '实时数据');
     assert.equal(await evaluate(socket, `document.querySelector('[role="tab"][aria-selected="true"]').textContent`), '实时数据');
     await click(socket, '配置');
     await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '方向校准' });
+    await screenshot(socket, 'installation-desktop');
+    const beforePose = await evaluate(socket, `window.__mwcp.session.draft['install.z_cm']`);
+    await dragHandle(socket,'pose-handle-1',0,-16);
+    assert.ok(await evaluate(socket, `window.__mwcp.session.draft['install.z_cm']`) > beforePose);
+    assert.equal(await evaluate(socket, `window.__mwcp.device.config['install.z_cm']`),beforePose,'drag must not persist before Save');
+    await evaluate(socket, `document.querySelector('[data-testid="installation-scene"]').nextElementSibling.querySelector('details').open=true`);
     const edited = await evaluate(socket, `(() => new Promise((resolve) => {
       const deadline = Date.now() + 3000;
       const tick = () => {
@@ -119,23 +126,34 @@ test('browser page clicks config and shows stale data on the simulated console',
     await click(socket, '添加矩形边界');
     assert.deepEqual(await evaluate(socket, `window.__mwcp.session.localChanges()['geometry.boundary_cm']`), [[-100,0],[100,0],[100,200],[-100,200]]);
     assert.equal(await evaluate(socket, `!!document.querySelector('[data-testid="scene-boundary"]')`), true);
+    await dragHandle(socket,'polygon-vertex-0',12,15);
+    const draggedBoundary=await evaluate(socket, `window.__mwcp.session.draft['geometry.boundary_cm']`);
+    assert.ok(draggedBoundary[0][0]>-100 && draggedBoundary[0][1]>0,'screen right/down means world +X/+Y');
+    await dragHandle(socket,'polygon-resize',15,15);
+    const resizedBoundary=await evaluate(socket, `window.__mwcp.session.draft['geometry.boundary_cm']`);
+    assert.ok(resizedBoundary[2][0]>draggedBoundary[2][0] && resizedBoundary[2][1]>draggedBoundary[2][1]);
+    await screenshot(socket, 'boundary-desktop');
     await click(socket, '区域占用');
     await click(socket, '添加区域');
     const areaDraft = await evaluate(socket, `window.__mwcp.session.localChanges()['areas.definitions'][0]`);
     assert.equal(areaDraft.slot, 0);
     assert.equal(areaDraft.enabled, true);
     assert.deepEqual(areaDraft.points_cm, [[-100,0],[100,0],[100,200],[-100,200]]);
+    await dragHandle(socket,'polygon-move',15,10);
+    const movedArea=await evaluate(socket, `window.__mwcp.session.draft['areas.definitions'][0]`);
+    assert.ok(movedArea.points_cm[0][0]>areaDraft.points_cm[0][0]);
+    assert.equal(movedArea.points_cm[1][0]-movedArea.points_cm[0][0],200);
     await click(socket, '保存到设备');
     await waitForText(socket, { timeoutMs: 5000, commandTimeoutMs: 1000, match: '已保存并读回' });
-    assert.deepEqual(await evaluate(socket, `window.__mwcp.device.config['areas.definitions'][0]`), areaDraft);
+    assert.deepEqual(await evaluate(socket, `window.__mwcp.device.config['areas.definitions'][0]`), movedArea);
     await click(socket, '方向校准');
     await evaluate(socket, `window.__mwcp.device.emitTelemetry(window.__mwcp.observation('zero'))`);
-    await click(socket, '快速验证');
-    const freshQuick = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '报告有人' });
-    assert.match(freshQuick, /报告有人/);
     await click(socket, '实时数据');
     const freshLive = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '报告有人' });
     assert.match(freshLive, /报告有人/);
+    assert.match(freshLive, /R60ABD1/);
+    assert.equal(await evaluate(socket, `document.querySelectorAll('[data-testid="range-label"]').length`),3);
+    assert.ok(await evaluate(socket, `Number(document.querySelector('[data-testid="distance-scale"]').dataset.lengthCm)>0`));
     await evaluate(socket, `(() => {
       const now = window.__mwcp.clock.now(); const sent = now + 20000;
       window.__mwcp.device.emitTelemetry({
@@ -149,27 +167,39 @@ test('browser page clicks config and shows stale data on the simulated console',
       window.__mwcp.session.touchClock();
       return window.__mwcp.session.layers.radar;
     })()`);
-    await click(socket, '快速验证');
-    const mixedQuick = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '部分可用' });
-    assert.match(mixedQuick, /已过期 · 有目标/);
-    assert.match(mixedQuick, /目标坐标仍按自己的时间有效/);
-    assert.doesNotMatch(mixedQuick, /报告有人/);
     await click(socket, '实时数据');
     const mixedLive = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '12, 34' });
-    assert.match(mixedLive, /有效 · sample/);
+    assert.match(mixedLive, /方向校准后的坐标 · 有效/);
     assert.match(mixedLive, /已过期/);
+    assert.doesNotMatch(mixedLive, /报告有人/);
     await evaluate(socket, `(() => { window.__mwcp.clock.advance(9001); window.__mwcp.session.touchClock(); return window.__mwcp.session.observationView().presence; })()`);
     const staleLive = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '已过期' });
     assert.doesNotMatch(staleLive, /\bvalid\b/);
-    await click(socket, '快速验证');
-    const staleQuick = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '已过期' });
-    assert.match(staleQuick, /已过期/);
     await evaluate(socket, `window.__mwcp.device.emitTelemetry(window.__mwcp.observation('zero'))`);
     const restored = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '报告有人' });
     assert.doesNotMatch(restored, /已过期/);
-    await click(socket, '配置');
-    const wifiPanel = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '可选配网' });
+    await evaluate(socket, `(() => {
+      const body = window.__mwcp.observation('zero');
+      const sample_ms = body.sent_ms;
+      body.metrics = Object.fromEntries([
+        ['distance.cm',120,'valid'], ['breath_rate',18,'valid'], ['heart_rate',72,'valid'],
+        ['diagnostics.local_z',0,'valid'], ['speed.cm_s',null,'unsupported'],
+        ['motion.state',null,'unknown'], ['body.movement',0,'valid'],
+        ['sleep.state',null,'unknown'], ['areas.occupancy',null,'unknown'],
+      ].map(([key,value,quality])=>[key,{value,quality,sample_ms}]));
+      window.__mwcp.device.emitTelemetry(body);
+    })()`);
+    await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '呼吸频率' });
+    assert.equal(await evaluate(socket, `!!document.querySelector('figure [data-testid="live-metrics"]')`), true);
+    const metricsText = await evaluate(socket, `document.querySelector('[data-testid="live-metrics"]').textContent`);
+    assert.match(metricsText, /呼吸频率18 次\/分/);
+    assert.match(metricsText, /体动幅度0/);
+    assert.doesNotMatch(metricsText, /breath_rate|heart_rate/);
+    assert.match(await evaluate(socket, `document.querySelector('[data-testid="metrics-enhanced"]').textContent`), /区域占用/);
+    await click(socket, '诊断');
+    const wifiPanel = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '网络与配网' });
     assert.match(wifiPanel, /SSID/);
+    assert.doesNotMatch(wifiPanel, /快速验证|读取网络|读取设备信息|工作频段|信道/);
     await socket.send('Emulation.setDeviceMetricsOverride', {width:1280,height:1100,deviceScaleFactor:1,mobile:false});
     await screenshot(socket, 'config-desktop');
     await click(socket, '实时数据');
@@ -185,13 +215,35 @@ test('browser page clicks config and shows stale data on the simulated console',
     await screenshot(socket, 'areas-mobile-dark');
     await evaluate(socket, `document.documentElement.classList.remove('dark')`);
     await socket.send('Emulation.setDeviceMetricsOverride', {width:1280,height:1100,deviceScaleFactor:1,mobile:false});
-    await click(socket, '方向校准');
+    await click(socket, '诊断');
     await evaluate(socket, `(() => {
-      const ssid = [...document.querySelectorAll('label')].find((el) => el.textContent.includes('SSID')).querySelector('input');
-      const password = [...document.querySelectorAll('label')].find((el) => el.textContent.includes('密码')).querySelector('input');
+      const device=window.__mwcp.device;
+      // Match the real ESPHome adapter: authenticated networks report unknown.
+      device.scanItems=[{ssid:'Lab',rssi_dbm:-40,auth:'unknown',hidden:false},{ssid:'Guest',rssi_dbm:-65,auth:'open',hidden:false}];
+      const scan=device.wifiScan.bind(device);
+      device.wifiScan=(...args)=>{const reply=scan(...args); if(reply.ok) device.advanceJob(reply.result.job_id,'succeeded'); return reply;};
+      return true;
+    })()`);
+    await click(socket, '搜索 SSID');
+    await waitForText(socket, { timeoutMs: 5000, commandTimeoutMs: 1000, match: '选择搜索到的网络' });
+    assert.equal(await evaluate(socket, `document.querySelector('[data-testid="wifi-network-0"]').disabled`), false);
+    assert.doesNotMatch(await evaluate(socket, `document.querySelector('[data-testid="network-panel"]').textContent`), /暂不支持此安全类型/);
+    assert.equal(await evaluate(socket, `window.__mwcp.session.snapshot().wifiScan.items[0].auth`), 'unknown', 'raw scan auth must remain unchanged');
+    assert.equal(await evaluate(socket, `!!document.querySelector('[data-testid="wifi-credentials"]')`), false);
+    assert.equal(await evaluate(socket, `document.querySelectorAll('[data-testid="network-panel"] select, [data-testid="network-panel"] input:not([type="radio"])').length`), 0);
+    assert.deepEqual(await evaluate(socket, `[...document.querySelectorAll('[data-signal-level]')].map(el=>[el.dataset.signalLevel,el.dataset.secured])`), [['3','true'],['2','false']]);
+    await evaluate(socket, `document.querySelector('[data-testid="wifi-network-1"]').click()`);
+    assert.equal(await evaluate(socket, `document.querySelectorAll('[data-testid="wifi-credentials"] input').length`), 0, 'open networks need no password');
+    assert.equal(await evaluate(socket, `[...document.querySelectorAll('button')].find(b=>b.textContent==='提交配网').disabled`), false);
+    await evaluate(socket, `document.querySelector('[data-testid="wifi-network-0"]').click()`);
+    assert.equal(await evaluate(socket, `[...document.querySelectorAll('button')].find(b=>b.textContent==='提交配网').disabled`), true, 'secured network waits for password');
+    await click(socket, '搜索 SSID');
+    assert.equal(await evaluate(socket, `!!document.querySelector('[data-testid="wifi-credentials"]')`), false, 'rescan clears selection');
+    await waitForText(socket, { timeoutMs: 5000, commandTimeoutMs: 1000, match: '选择搜索到的网络' });
+    await evaluate(socket, `document.querySelector('[data-testid="wifi-network-0"]').click()`);
+    await evaluate(socket, `(() => {
+      const password = [...document.querySelectorAll('label')].find((el) => el.textContent.trim() === '密码').querySelector('input');
       const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      set.call(ssid, 'Lab');
-      ssid.dispatchEvent(new Event('input', { bubbles: true }));
       set.call(password, 'lab-pass-1');
       password.dispatchEvent(new Event('input', { bubbles: true }));
       return 'filled';
@@ -199,20 +251,28 @@ test('browser page clicks config and shows stale data on the simulated console',
     await click(socket, '提交配网');
     const accepted = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '已受理' });
     assert.doesNotMatch(accepted, /已联网/);
+    assert.equal(await evaluate(socket, `[...document.querySelectorAll('button')].find(b=>b.textContent==='配网中…')?.disabled`),true);
     await click(socket, '查询原任务');
     const queried = await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '已受理' });
     assert.match(queried, /已受理|处理中/);
     await evaluate(socket, `(() => {
-      const job = [...window.__mwcp.device.activeJobs.values()][0];
+      const job = [...window.__mwcp.device.activeJobs.values()].find(j=>j.action_id==='wifi.provision');
       job.state = 'succeeded';
-      window.__mwcp.device.wifi = { state: 'connected', ssid: 'Lab', ip: '192.168.1.50', rssi_dbm: -40, last_error: null };
+      window.__mwcp.device.wifi = { state: 'connected', ssid: 'Lab', ip: '192.168.1.50', rssi_dbm: -40, last_error: null, mac_address:'00:11:22:33:44:55', band:'2.4 GHz', channel:6 };
       return 'ready';
     })()`);
     const wifiLink = await waitForText(socket, { timeoutMs: 4000, commandTimeoutMs: 1000, match: '192.168.1.50' });
     assert.match(wifiLink, /已联网/);
+    assert.match(wifiLink, /00:11:22:33:44:55/);
+    assert.doesNotMatch(wifiLink, /工作频段|信道|2\.4 GHz/);
+    await screenshot(socket, 'network-connected-desktop');
+    await socket.send('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
+    await screenshot(socket, 'network-connected-mobile');
+    assert.equal(await evaluate(socket, 'document.documentElement.scrollWidth <= 390'),true);
+    await socket.send('Emulation.setDeviceMetricsOverride', {width:1280,height:1100,deviceScaleFactor:1,mobile:false});
     assert.doesNotMatch(wifiLink, /lab-pass-1/);
     await evaluate(socket, `(() => {
-      const password = [...document.querySelectorAll('label')].find((el) => el.textContent.includes('密码')).querySelector('input');
+      const password = [...document.querySelectorAll('label')].find((el) => el.textContent.trim() === '密码').querySelector('input');
       const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
       set.call(password, 'lab-pass-1');
       password.dispatchEvent(new Event('input', { bubbles: true }));
@@ -220,7 +280,7 @@ test('browser page clicks config and shows stale data on the simulated console',
     })()`);
     await evaluate(socket, '(() => { window.__mwcp.session.rpcAt = Array(8).fill(window.__mwcp.clock.now()); })()');
     const stuck = evaluate(socket, `(() => {
-      const password = [...document.querySelectorAll('label')].find((el) => el.textContent.includes('密码')).querySelector('input');
+      const password = [...document.querySelectorAll('label')].find((el) => el.textContent.trim() === '密码').querySelector('input');
       const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
       set.call(password, 'lab-pass-1');
       password.dispatchEvent(new Event('input', { bubbles: true }));
@@ -232,7 +292,7 @@ test('browser page clicks config and shows stale data on the simulated console',
     await evaluate(socket, 'window.__mwcp.device.reboot()');
     await evaluate(socket, '(() => { window.__mwcp.session.rpcAt = []; })()');
     await click(socket, '连接设备');
-    await waitForText(socket, { timeoutMs: 5000, commandTimeoutMs: 1000, match: '已就绪' });
+    await waitForText(socket, { timeoutMs: 5000, commandTimeoutMs: 1000, match: 'MWCP 1.0' });
     const leaked = await evaluate(socket, `(() => {
       let provisions = 0;
       window.__mwcp.device.dispatch = ((original) => (frame, now) => {
@@ -247,10 +307,10 @@ test('browser page clicks config and shows stale data on the simulated console',
     await click(socket, '断开');
     await evaluate(socket, 'window.__mwcp.device.reboot()');
     await click(socket, '连接设备');
-    await waitForText(socket, { timeoutMs: 5000, commandTimeoutMs: 1000, match: '已就绪' });
-    await click(socket, '配置');
-    const cleared = await evaluate(socket, `(() => { const password = [...document.querySelectorAll('label')].find((el) => el.textContent.includes('密码')); return password ? password.querySelector('input').value : 'gone'; })()`);
-    assert.equal(cleared, '');
+    await waitForText(socket, { timeoutMs: 5000, commandTimeoutMs: 1000, match: 'MWCP 1.0' });
+    await click(socket, '诊断');
+    const cleared = await evaluate(socket, `(() => { const password = [...document.querySelectorAll('label')].find((el) => el.textContent.trim() === '密码'); return password ? password.querySelector('input').value : 'gone'; })()`);
+    assert.equal(cleared, 'gone');
     await click(socket, '配置');
     await evaluate(socket, `window.__mwcp.device.faults.delayMs = 60000`);
     await click(socket, '重新读取设备');
@@ -281,10 +341,7 @@ test('browser page clicks config and shows stale data on the simulated console',
 
 async function click(cdp, label) {
   if (label === '快速验证') {
-    await evaluate(cdp, `(() => { const box = document.querySelector('label.check-row input[type="checkbox"]'); if (!box.checked) box.click(); })()`);
-    await click(cdp, '诊断');
-    await evaluate(cdp, `(() => { const el = [...document.querySelectorAll('summary')].find((el) => el.textContent === '快速验证'); if (!el.parentElement.open) el.click(); })()`);
-    return;
+    throw new Error('Quick verification was removed; exercise the live view instead');
   }
   if (label === '在设备上验证') await evaluate(cdp, `(() => { const el = [...document.querySelectorAll('summary')].find((el) => el.textContent === '更多操作'); if (el && !el.parentElement.open) el.click(); })()`);
   const result = await evaluate(cdp, `(() => {
@@ -295,6 +352,18 @@ async function click(cdp, label) {
     return 'clicked';
   })()`);
   assert.equal(result, 'clicked', label);
+}
+
+async function dragHandle(cdp, id, dx, dy) {
+  const point = await evaluate(cdp, `(async () => {
+    const el=document.querySelector('[data-testid="${id}"]');el.scrollIntoView({block:'center',behavior:'instant'});
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};
+  })()`);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:point.x+dx,y:point.y+dy,button:'left',buttons:1});
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:point.x+dx,y:point.y+dy,button:'left',clickCount:1});
+  await evaluate(cdp, 'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
 }
 
 async function evaluate(cdp, expression) {

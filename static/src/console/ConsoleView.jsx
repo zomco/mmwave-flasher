@@ -1,10 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, Circle, Download, Plug, Unplug, Usb } from 'lucide-react';
+import { AlertTriangle, Check, Download, Plug, Unplug, Usb } from 'lucide-react';
 import { consoleCopy } from './copy.js';
-import { checksFromSession, csvCell, redactExport, targetRows } from './observe.js';
-import { presentation, savedConfig, stackStatus } from './presentation.js';
+import { csvCell, redactExport, targetRows } from './observe.js';
+import { presentation, savedConfig } from './presentation.js';
+import DeviceStack from './DeviceStack.jsx';
 import RadarScene from './RadarScene.jsx';
 import ConfigPanels from './ConfigPanels.jsx';
+import LiveMetrics from './LiveMetrics.jsx';
+import { signalLevel } from './live-metrics.js';
+import { wifiProvisionAuth } from './wifi-network.js';
 
 function download(name, text, type) {
   const blob = new Blob([text], { type });
@@ -24,7 +28,6 @@ export default function ConsoleView({ language, session, snapshot, support, onCo
   const t = consoleCopy[language] || consoleCopy.en;
   const u = presentation[language] || presentation.en;
   const [tab, setTab] = useState('live');
-  const [advanced, setAdvanced] = useState(false);
   const [message, setMessage] = useState('');
   const [includeNetwork, setIncludeNetwork] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -88,7 +91,6 @@ export default function ConsoleView({ language, session, snapshot, support, onCo
   const view = session && typeof session.observationView === 'function'
     ? session.observationView()
     : { presence: 'unknown', targets: 'unknown', vitals: 'none', vitalFields: [], live: false, historical: false };
-  const checks = useMemo(() => checksFromSession(session), [session, snap]);
   const shown = paused && frozen ? frozen : snap.telemetry;
   const boundary = savedConfig(snap)['geometry.boundary_cm'];
   const display = paused && frozen
@@ -188,18 +190,14 @@ export default function ConsoleView({ language, session, snapshot, support, onCo
       {portPhase === 'close_failed' && <p className="notice mt-4" role="status">{t.closeFailed}</p>}
       {portPhase === 'installer_unconfirmed' && <p className="notice mt-4" role="status">{t.afterInstaller}</p>}
       {message && <p className="notice mt-4" role="status">{message}</p>}
-      <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3" aria-label="USB / MWCP">
-        {stackStatus(snap,t,u).map((layer,i) => <div key={layer.label} className="soft-surface min-w-0 p-3 sm:p-4"><div className="muted text-xs">0{i+1} · {layer.label}</div><div className="mt-2 flex items-center gap-2 text-sm font-semibold"><span className={'h-2 w-2 shrink-0 rounded-full '+(layer.good ? 'bg-emerald-500' : 'bg-slate-400')}/>{layer.value}</div><p className="muted mt-2 hidden text-xs sm:block">{layer.detail}</p></div>)}
-      </div>
-      {snap.identity && <div className="soft-surface mt-4 p-4 text-sm leading-7">
-        <div className="font-semibold">{snap.identity.configured_model || '—'} · {snap.identity.dimension || '—'} · {snap.identity.firmware_version || '—'}</div>
-      </div>}
       {snap.pending && <Banner>{t.leavePending}</Banner>}
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="step-nav flex-1" style={{gridTemplateColumns: advanced ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)'}} role="tablist" aria-label={u.title}>
-          {(advanced ? ['live','config','diag'] : ['live','config']).map((id) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'current' : ''} onClick={() => setTab(id)}>{t.tabs[id]}</button>)}
+      <div className="mt-5 grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+      <DeviceStack key={snap.generation} snap={snap} session={session} view={view} t={t} u={u}/>
+      <div className="min-w-0">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="step-nav flex-1" style={{gridTemplateColumns: 'repeat(3, 1fr)'}} role="tablist" aria-label={u.title}>
+          {['live','config','diag'].map((id) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'current' : ''} onClick={() => setTab(id)}>{t.tabs[id]}</button>)}
         </div>
-        <label className="check-row text-sm"><input type="checkbox" checked={advanced} onChange={(e) => { setAdvanced(e.target.checked); if (!e.target.checked && tab === 'diag') setTab('live'); }}/>{u.advanced}</label>
       </div>
       <div className="mt-6" role="tabpanel">
         {tab === 'live' && !snap.identity && <div className="soft-surface grid min-h-52 place-content-center gap-2 p-8 text-center"><Usb className="mx-auto mb-2 text-brand-600" size={32}/><h3 className="font-semibold">{u.empty}</h3><p className="muted text-sm">{u.emptyHint}</p></div>}
@@ -230,35 +228,17 @@ export default function ConsoleView({ language, session, snapshot, support, onCo
     onConfirmNew={() => confirmNewRecording()}
   />}
         {tab === 'config' && <Config t={t} u={u} session={session} snap={snap} />}
-        {tab === 'diag' && advanced && <><Diag t={t} u={u} session={session} snap={snap} includeNetwork={includeNetwork} setIncludeNetwork={setIncludeNetwork} /><details className="soft-surface mt-5 p-4"><summary>{t.tabs.quick}</summary><Quick t={t} checks={checks} reading={view} snap={snap}/></details></>}
+        {tab === 'diag' && <><Wifi key={snap.generation} t={t} u={u} session={session} snap={snap}/><Diag t={t} u={u} session={session} snap={snap} includeNetwork={includeNetwork} setIncludeNetwork={setIncludeNetwork} /></>}
       </div>
+      </div></div>
     </div>
   </section>;
-}
-
-function Quick({ t, checks, reading, snap }) {
-  const labels = { usb: t.steps.usb, radar: t.steps.radar, presence: t.steps.presence, config: t.steps.config };
-  return <div>
-    <ul className="mt-4 space-y-3">
-      {checks.map((item) => <li key={item.id} className="soft-surface flex items-start justify-between gap-3 p-4">
-        <div><div className="font-semibold">{labels[item.id]}</div><div className="muted mt-1 text-xs">{item.id === 'presence' && item.state !== 'present' && item.state !== 'absent' ? t.presenceHint : ''}</div></div>
-        <Mark state={item.state} label={t.states[item.state] || item.state} />
-      </li>)}
-    </ul>
-    <p className="muted mt-2 text-xs">{t.states[reading.presence] || reading.presence} · {t.states[reading.targets] || reading.targets}{reading.historical ? ' · ' + t.historical : ''}{snap.telemetry ? ' · seq ' + snap.telemetry.source_seq : ''}</p>
-    {reading.live && reading.presence === 'stale' && reading.targets === 'points' && <p className="notice mt-3" role="status">{t.mixedFresh}</p>}
-  </div>;
-}
-
-function Mark({ state, label }) {
-  const good = state === 'pass' || state === 'present' || state === 'absent';
-  return <span className={"inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-sm font-semibold " + (good ? 'text-brand-700 dark:text-brand-300' : '')}>{good ? <Check size={16} /> : <Circle size={14} />}{label}</span>;
 }
 
 function Live({ t, u, snap, shown, rows, reading, paused, onPause, onResume, recordState, recording, confirmDiscard, confirmAction, onRecord, onClear, onConfirmDiscard, onClearNow, onConfirmNew, onConfirmClear }) {
   const oneD = rows.some((row) => row.oneD) || (snap.identity && snap.identity.dimension === '1D');
   return <div>
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><span className="muted text-sm">{t.steps.presence}</span><strong className="text-xl">{t.states[reading.presence] || reading.presence}</strong></div><button className="secondary-button" disabled={!shown} onClick={paused ? onResume : onPause}>{paused ? t.resume : t.pause}</button></div>
+    <div className="mb-4 flex justify-end"><button className="secondary-button" disabled={!shown} onClick={paused ? onResume : onPause}>{paused ? t.resume : t.pause}</button></div>
     <details className="soft-surface mb-4 p-4"><summary className="cursor-pointer text-sm font-semibold">{u.records} · {recording.length}{recordState === 'recording' ? ' · '+t.recordingActive : ''}</summary>
     <div className="mt-4 flex flex-wrap gap-2">
       <button className="secondary-button" disabled={!snap.sessionLive && recordState !== 'recording'} onClick={onRecord}>{recordState === 'recording' ? t.stopRecord : (recording.length ? t.recordNew : t.record)}</button>
@@ -276,16 +256,10 @@ function Live({ t, u, snap, shown, rows, reading, paused, onPause, onResume, rec
     </details>
     {paused && <p className="notice mt-4" role="status">{t.pausedView}</p>}
     {!paused && reading.historical && <p className="notice mt-4" role="status">{t.historical}</p>}
-    <div className="mt-4 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-      <div>{oneD && <div className="soft-surface mb-3 p-4"><RangeAxis rows={rows}/></div>}<RadarScene config={savedConfig(snap)} rows={rows} u={u}/></div>
-      <div className="space-y-3 text-sm">
-        {rows.map((row) => <div key={row.key} className={"soft-surface p-4 " + (row.faded ? 'opacity-60' : '')}>
-          <div className="font-semibold">{row.oneD ? row.rangeCm + ' cm' : formatPoint(row.room)}</div>
-          <div className="muted mt-1 text-xs">{t.states[row.quality] || row.quality} · sample {row.sampleMs == null ? '—' : row.sampleMs}{row.faded ? ' · ' + t.outside : ''}</div>
-        </div>)}
-        {!rows.length && <p className="notice">{t.states[reading.targets] || reading.targets}</p>}
-        <Vitals t={t} fields={reading.vitalFields} />
-      </div>
+    <div className="mt-4 grid gap-4">
+      <div>{oneD && <div className="soft-surface mb-3 p-4"><RangeAxis rows={rows}/></div>}<RadarScene config={savedConfig(snap)} rows={rows} u={u}>
+        <LiveMetrics reading={reading} rows={rows} model={snap.identity?.configured_model} language={u === presentation.zh ? 'zh' : 'en'} t={t}/>
+      </RadarScene></div>
     </div>
   </div>;
 }
@@ -298,16 +272,6 @@ function RangeAxis({ rows }) {
     </div>
     <div className="mt-3 flex justify-between text-xs"><span>0</span><span>{max} cm</span></div>
   </div>;
-}
-
-function Vitals({ t, fields }) {
-  if (!fields || !fields.length) return null;
-  return <details className="soft-surface p-4"><summary>{t.vitals}</summary><ul className="mt-3 space-y-2 text-xs">{fields.map((field) => <li key={field.key}>{field.key}: {field.state === 'valid' ? String(field.value) : (t.states[field.state] || field.state)}</li>)}</ul></details>;
-}
-
-function formatPoint(point) {
-  if (!Array.isArray(point)) return '—';
-  return point.map((n) => Number(n).toFixed(0)).join(', ') + ' cm';
 }
 
 function toCsv(recording) {
@@ -349,7 +313,6 @@ function Config({ t, u, session, snap }) {
       </>}
     </div>
     {snap.save.phase === 'unknown' && <p className="muted mt-3 text-xs leading-6">{t.abandonHint}</p>}
-    <Wifi t={t} session={session} snap={snap} />
   </div>;
 }
 
@@ -364,19 +327,38 @@ function IncomingCompare({ t, draft, incoming }) {
   </div>;
 }
 
-function Wifi({ t, session, snap }) {
+function Wifi({ t, u, session, snap }) {
   const [ssid, setSsid] = useState('');
   const [password, setPassword] = useState('');
   const [notice, setNotice] = useState('');
   const [querying, setQuerying] = useState(false);
+  const [auth, setAuth] = useState('wpa2_psk');
+  const [selected, setSelected] = useState('');
   const sessionKey = String(snap.generation || 0) + ':' + String(snap.bootId || '');
   useEffect(() => {
     setPassword('');
     setSsid('');
     setNotice('');
+    setAuth('wpa2_psk');
+    setSelected('');
   }, [sessionKey]);
+  useEffect(() => {
+    if (!snap.sessionLive) return;
+    let active = true, timer;
+    const refresh = async (attempt = 0) => {
+      if (!active) return;
+      const result = await session.refreshWifi();
+      if (!active) return;
+      if (result?.reason === 'rpc_inflight' && attempt < 4) timer = setTimeout(() => refresh(attempt + 1), 500);
+      else if (result?.reason === 'rpc_inflight') setNotice(t.wifiRpcBusy);
+    };
+    void refresh();
+    return () => { active = false; clearTimeout(timer); };
+  }, [session, sessionKey, snap.sessionLive]);
   const wifi = snap.wifi;
   const task = snap.wifiTask;
+  const scan = snap.wifiScan;
+  const scanning = scan?.phase === 'scanning';
   const denied = snap.capabilities.some((item) => (item.id === 'wifi' || item.id === 'wifi.status' || item.id === 'wifi.provision') && item.supported === false);
   const unsupported = denied || (wifi && wifi.state === 'unsupported' && wifi.current);
   const locked = task && (task.phase === 'submitting' || task.phase === 'accepted' || task.phase === 'running' || task.phase === 'querying' || (task.phase === 'unknown' && (task.opId || task.jobId)));
@@ -384,18 +366,22 @@ function Wifi({ t, session, snap }) {
     const now = session.snapshot ? session.snapshot() : snap;
     return String(now.generation || 0) + ':' + String(now.bootId || '');
   };
-  const refresh = async () => {
+  const search = async () => {
     const key = currentKey();
     setNotice('');
-    const result = await session.refreshWifi();
+    setSelected('');
+    setSsid('');
+    setPassword('');
+    const result = await session.scanWifi();
     if (currentKey() !== key) return;
     if (result && result.reason === 'rpc_inflight') setNotice(t.wifiRpcBusy);
   };
   const submit = async () => {
+    if (selected === '' || !['open', 'wpa2_psk'].includes(auth) || locked || scanning) return;
     const key = currentKey();
     const typed = password;
     setNotice('');
-    const result = await session.provisionWifi({ ssid, password: typed });
+    const result = await session.provisionWifi({ ssid, password: auth === 'open' ? '' : typed, auth });
     if (currentKey() !== key) return;
     setPassword('');
     if (!result) return;
@@ -403,8 +389,7 @@ function Wifi({ t, session, snap }) {
     else if (result.reason === 'provision_busy') setNotice(t.wifiBusy);
     else if (result.reason === 'pending_save') setNotice(t.unknownSave);
     else if (result.unknown) setNotice(t.wifiUnknown);
-    else if (!result.ok) setNotice(t.wifiFailed);
-    else setNotice(t.wifiAccepted);
+    else if (!result.ok) setNotice(t.wifiFailed + (result.reason ? ' · '+(u.wifiErrors[result.reason] || result.reason) : ''));
   };
   const query = async () => {
     if (querying) return;
@@ -419,28 +404,56 @@ function Wifi({ t, session, snap }) {
     return null;
   }
   if (unsupported) return <div className="mt-6 border-t border-slate-200 pt-5 dark:border-white/10"><h3 className="font-semibold">{t.wifiTitle}</h3><p className="muted mt-1 text-sm">{t.wifiUnsupported} {t.wifiFallback}</p></div>;
-  const connected = wifi && wifi.current && wifi.state === 'connected';
-  return <div className="mt-6 border-t border-slate-200 pt-5 dark:border-white/10">
-    <h3 className="font-semibold">{t.wifiTitle}</h3>
-    <p className="mt-3 text-sm" role="status">{t.wifiState}: {wifi && wifi.current ? (t.wifiStates[wifi.state] || wifi.state) : t.wifiStates.unknown}{connected && wifi.ip ? ' · ' + wifi.ip : ''}</p>
-    {task && <p className="muted mt-1 text-sm">{t.wifiTask}: {t.wifiPhases[task.phase] || task.phase}{task.phase === 'unknown' ? ' · ' + t.wifiUnknownNext : ''}</p>}
+  const network = wifi?.current && !wifi.historical ? wifi : {};
+  const connected = network.state === 'connected';
+  const fields = [[u.hardware[3], network.mac_address || snap.identity?.mac_address], [u.hardware[4], connected ? network.ip : null], ['SSID', connected ? network.ssid : null], [u.hardware[6], connected && Number.isFinite(network.rssi_dbm) ? network.rssi_dbm+' dBm' : null]];
+  const inProgress = locked && task.phase !== 'unknown';
+  return <div className="mb-6 border-b border-slate-200 pb-6 dark:border-white/10" data-testid="network-panel">
+    <h3 className="font-semibold">{u.network}</h3>
+    <p className="mt-3 text-sm" role="status">{t.wifiState}: {wifi && wifi.current ? (t.wifiStates[wifi.state] || wifi.state) : t.wifiStates.unknown}</p>
+    <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">{fields.map(([label,value]) => <div key={label}><dt className="muted text-xs">{label}</dt><dd className="break-all font-medium">{typeof value === 'string' && value.length || Number.isFinite(value) ? value : u.unreported}</dd></div>)}</dl>
+    {task && <p className="muted mt-3 text-sm" role="status">{t.wifiTask}: {t.wifiPhases[task.phase] || task.phase}{task.phase === 'unknown' ? ' · ' + t.wifiUnknownNext : ''}{task.reason ? ' · '+(u.wifiErrors[task.reason] || task.reason) : ''}</p>}
+    {network.last_error && <p className="notice mt-3" role="status">{t.wifiFailed} · {u.wifiErrors[network.last_error] || network.last_error}</p>}
     {notice && <p className="notice mt-3" role="status">{notice}</p>}
     <div className="mt-3 flex flex-wrap gap-2">
-      <button className="secondary-button" onClick={refresh}>{t.wifiRefresh}</button>
+      <button className="secondary-button" disabled={scanning || locked} onClick={search}>{scanning ? u.scanning : u.scan}</button>
       {task && (task.opId || task.jobId) && task.phase !== 'succeeded' && task.phase !== 'failed' && <button className="secondary-button" disabled={querying} onClick={query}>{t.wifiQuery}</button>}
     </div>
-    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-      <label className="text-sm font-semibold">{t.ssid}<input className="field mt-2" value={ssid} autoComplete="off" onChange={(event) => setSsid(event.target.value)} /></label>
-      <label className="text-sm font-semibold">{t.password}<input className="field mt-2" type="password" value={password} autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} /></label>
-    </div>
-    <button className="secondary-button mt-3" disabled={locked} onClick={submit}>{t.provision}</button>
-    <JobList t={t} jobs={snap.jobs} />
+    {scan?.phase === 'failed' && <p className="muted mt-2 text-sm" role="status">{scan.reason === 'UNSUPPORTED' ? u.scanUnsupported : u.scanFailed}</p>}
+    {scan?.phase === 'ready' && (scan.items.length ? <fieldset className="mt-4" disabled={Boolean(locked || scanning)}>
+      <legend className="mb-2 text-sm font-semibold">{u.scanSelect}</legend>
+      <div className="grid max-h-64 gap-1 overflow-y-auto rounded-xl border border-slate-200 p-1 dark:border-white/10">
+        {scan.items.map((item, i) => {
+          const provisionAuth = wifiProvisionAuth(item.auth);
+          const supported = provisionAuth !== null;
+          const level = signalLevel(item.rssi_dbm);
+          return <label key={i} className={'flex min-w-0 cursor-pointer items-center gap-3 rounded-lg p-3 ' + (selected === String(i) ? 'bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/40' : 'hover:bg-slate-500/10') + (!supported ? ' opacity-50' : '')}>
+            <input type="radio" name="console-wifi-network" className="shrink-0 accent-emerald-600" data-testid={'wifi-network-' + i} checked={selected === String(i)} disabled={!supported} onChange={() => { setSelected(String(i)); setSsid(item.ssid); setAuth(provisionAuth); setPassword(''); setNotice(''); }}/>
+            <NetworkIcon level={level} secured={item.auth !== 'open'}/>
+            <span className="min-w-0 flex-1 break-all text-sm font-medium">{item.ssid}{!supported && <span className="muted block text-xs">{u.scanAuthUnsupported}</span>}</span>
+            <span className="muted shrink-0 text-xs tabular-nums">{Number.isFinite(item.rssi_dbm) ? item.rssi_dbm + ' dBm' : '—'}</span>
+            <span className="sr-only">{u.signalLevels[level]} · {item.auth === 'open' ? u.open : u.passwordRequired}</span>
+          </label>;
+        })}
+      </div>
+    </fieldset> : <p className="muted mt-2 text-sm">{u.scanEmpty}</p>)}
+    {selected !== '' && <div className="mt-4" data-testid="wifi-credentials">
+      {auth !== 'open' && <label className="block text-sm font-semibold">{t.password}<input className="field mt-2" type="password" disabled={Boolean(locked || scanning)} value={password} autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} /></label>}
+      <button className="secondary-button mt-3" disabled={Boolean(locked || scanning || !ssid || (auth !== 'open' && !password))} onClick={submit}>{inProgress ? u.provisioning : t.provision}</button>
+    </div>}
   </div>;
 }
 
-function JobList({ t, jobs }) {
-  if (!jobs.length) return null;
-  return <ul className="mt-3 space-y-2 text-sm">{jobs.map((job) => <li key={job.job_id}>{job.action_id || job.job_id}: {job.state}{job.verified ? '' : ' · ' + t.jobUnknown}</li>)}</ul>;
+function NetworkIcon({ level, secured }) {
+  return <svg viewBox="0 0 32 28" className="h-7 w-8 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" data-signal-level={level} data-secured={secured}>
+    <g fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+      <path d="M2 8a20 20 0 0 1 28 0" opacity={level >= 3 ? 1 : .18}/>
+      <path d="M6 13a14 14 0 0 1 20 0" opacity={level >= 2 ? 1 : .18}/>
+      <path d="M11 18a7 7 0 0 1 10 0" opacity={level >= 1 ? 1 : .18}/>
+    </g>
+    <circle cx="16" cy="23" r="1.8" fill="currentColor" opacity={level ? 1 : .18}/>
+    {secured && <g stroke="currentColor" strokeWidth="1.4"><rect x="23" y="20" width="8" height="7" rx="1.5" className="fill-slate-50 dark:fill-slate-950"/><path d="M25 20v-2a2 2 0 0 1 4 0v2" fill="none"/></g>}
+  </svg>;
 }
 
 function Diag({ t, u, session, snap, includeNetwork, setIncludeNetwork }) {

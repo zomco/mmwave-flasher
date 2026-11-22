@@ -50,24 +50,39 @@ Use desktop Chrome or Edge. The address must be HTTPS, or localhost on your own 
 
 These are user steps. They do not authorize anyone to flash or open a port now.
 
+If MWCP firmware is already installed, start at step 6. Console connections do not depend on installer model selection.
+
 1. Open the page and choose **R60ABD1**.
 2. Choose the board. The reference pair is **ESP32-C3 Super Mini**. Check the silkscreen, then tick the wiring confirmation.
 3. Open the firmware step. When a compatible Beta exists, the page first says it is verifying the manifest. **Connect & flash** becomes available only after that check, and it uses that manifest. Alpha is never selected for you. To try an Alpha, select it yourself and tick the risk confirmation.
 4. If the manifest is unavailable, the version does not match, or the checksum fails, flashing stays off. Do not substitute an unknown file.
 5. Flashing happens in the browser installer. Close that window when it finishes, wait until the port is no longer reported busy, then connect manually. Closing the window does not release the port. If it still says busy, wait a few seconds and try again. The page does not take the port over, and closing the window does not mean the flash succeeded.
 6. In **USB debug**, choose **Connect device**. In the system dialog, pick the controller USB port. Cancelling is not a device fault; choose **Connect device** again.
-7. When the protocol is online, read configured_model, the dimension, and the firmware version. The model comes from the firmware configuration, not from the USB identifiers. If it differs from the page selection, the page uses the model the device reports. It does not change the flash target and it does not flash by itself.
-8. Read a valid sample under **Quick check** or **Live data**. Unknown, stale, and historical samples are not "nobody present". A coordinate of 0, or an empty target list, is not presence either. Only a presence sample from the device counts.
+7. Connecting automatically opens **Live data**. The left sidebar shows the device stack, configured model and firmware version. The model comes from firmware configuration, not USB identifiers, and does not change the installer selection.
+8. Read a valid sample under **Live data** or **Diagnostics → Quick check**. Unknown, stale, and historical samples are not "nobody present". A coordinate of 0, or an empty target list, is not presence either. Only a presence sample from the device counts.
 9. **Vitals (not a medical device)** show a number only when the device declares that capability and the sample is valid. An undeclared capability shows no number. These figures are not for medical decisions.
 10. Open **Configuration**. Change one field, choose **Validate on device**, read the change list, then choose **Save to device**. The complete success text is **Saved and read back**. Then choose **Disconnect**.
 
-## What the five layers mean
+## The four-layer device stack
 
 - **Port**: whether the browser has the USB port open. Open is not a finished handshake.
 - **Protocol**: whether the MWCP handshake finished. Online means this session is still alive.
-- **Radar**: the link between the controller and the radar, as the device reports it. An online protocol does not replace it.
-- **Data**: whether a usable observation is current. A historical sample is marked and is not the person in the room now.
-- **Config**: whether configuration can be read or written. A failed read is not a successful save.
+- **Controller**: the current session has received identity and uptime responses. This is not a complete hardware self-test.
+- **Radar**: a current, valid presence sample and usable observation link. Both present and absent can be healthy reports; unknown or stale samples cannot activate this layer.
+
+Bottom to top: serial, protocol, controller, radar. An unavailable layer grays out itself and every layer above it. Healthy layers show the uppercase radar model, controller model and firmware version, and negotiated protocol version respectively. Identity is read automatically at connection; there is no separate device-information list or read button. Missing fields remain Not reported and are never inferred from USB identifiers. Save status remains separate on the Configuration tab.
+
+## Graphic controls and diagnostics
+
+- The plan view uses room coordinates with **X to the right and Y downward**. The ungridded part of the preview card groups radar measurements and firmware enhancements, with readable names, units and short explanations. Unknown, stale and unsupported values never become zero or absence. The fan illustrates orientation, not a measured detection range.
+- **Orientation**: drag the 3D position XY, height Z, yaw, pitch and roll handles, or expand Precise values. Handles snap to the step declared by firmware.
+- **Boundary filter / Area occupancy**: drag a shape to move it, circular vertices to reshape it, and the lower-right square to resize. Select an area from the dropdown. Numeric editing and adding/removing vertices remain available. Focused handles also accept arrow keys.
+- Dragging only updates the draft. It does not write to the device. Editing is disabled during saves, expired sessions and configuration conflicts.
+- **Diagnostics** shows MAC, IP, SSID and signal strength alongside health statistics, logs and export. Opening it refreshes network status automatically. The read-network button and quick-check module have been removed. Leaving Diagnostics clears unsubmitted network inputs; submitted jobs remain tracked by the session.
+- The preview labels illustrative **1, 2 and 3 metre** distances and includes a scale bar that follows the viewport. The fan remains an orientation illustration, not a measured detection limit.
+- **Search SSIDs** refreshes a selectable list with signal-strength and lock icons. Password and submit controls appear after selection; open networks have no password field. Searching again or changing networks clears the previous password. The disabled submit button shows **Connecting…** while provisioning. Completion refreshes network status; failures retain the device's error reason. Unknown outcomes query the original job rather than repeating the write. There is no manual SSID or security selector; use the device hotspot for hidden networks or unsupported scanning.
+
+Controller model and MAC require firmware with the corresponding optional read-only metadata extensions. Older firmware remains compatible and displays Not reported. Updating this website does not update device firmware. Authenticated networks whose scan result does not identify the encryption mode remain selectable for a password connection attempt. The device's job result determines success; the page does not claim to have identified the encryption mode.
 
 Presence follows the device: Unknown, Stale, Unsupported, Reported absent, or Reported present. Those words are not substitutes. Absent appears only when the device says so.
 
@@ -114,10 +129,10 @@ On **Live data**, choose **Start recording** to collect new observations. **Stop
 
 Export removes values whose field names look like a password, token, or secret. A target index is not a stable identity of one person.
 
-**Export diagnostic summary** on **Diagnostics** leaves out the SSID and IP unless you tick the option to include them. The password is still omitted. The summary has a bounded recent log, not the full conversation. The production page connects in hardware mode and does not label a simulation as a real device.
+**Export diagnostic summary** on **Diagnostics** hides SSID, IP and MAC in network status by default. Including network information still does not include passwords. The summary contains only a bounded recent log slice, not a full communication capture. Production connects in hardware mode and never labels a simulation as a real-device pass.
 
 ## Home Assistant comes later
 
-USB verification does not need Home Assistant or Wi-Fi. A failed network setup does not block this console. Optional provisioning appears only when the device declares Wi-Fi. Without a declared scan, type the network name; the page will not change the firmware in order to scan. Sending the request does not mean the task finished.
+USB verification does not need Home Assistant or Wi-Fi. A failed network setup does not block this console. Optional provisioning appears only when the device declares Wi-Fi. Use the device hotspot if scanning is unavailable; the page does not change firmware automatically. Sending the request does not mean the task finished.
 
 To add Home Assistant and the room card afterwards, follow the [getting started guide](https://github.com/zomco/mmwave-component/blob/main/GETTING-STARTED.md). The card repository is [mmwave-card](https://github.com/zomco/mmwave-card). This console does not include track fusion, a desktop timeline, or other advanced features.

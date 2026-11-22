@@ -102,7 +102,7 @@ test('a checked Beta manifest can flash only while the port is free', async () =
     assert.equal(connecting.disabled, true);
     assert.match(await text(socket), /USB 调试正在连接、占用或释放这个端口/);
     await evaluate(socket, '(() => { window.__mwcp.serial.beforeGrant = null; window.__mwcp.releaseGrant(); })()');
-    const online = await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'r60abd1' });
+    const online = await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'MWCP 1.0' });
     assert.match(online, /R60ABD1/);
     const held = await waitInstall(socket, (state) => !state.custom && state.disabled === true, 4000);
     assert.equal(held.manifest, '');

@@ -3,7 +3,14 @@ export const presentation = {
   zh: {
     title: '设备控制台', intro: '连接 USB，查看雷达数据或调整设备配置。', advanced: '高级模式',
     empty: '连接设备后开始观测', emptyHint: '无需先选择雷达型号。',
-    physical: '连接层', protocol: '协议层', application: '应用层', usb: 'USB 串口',
+    physical: '串口层', protocol: '协议层', controller: '主控层', radarLayer: '雷达层', usb: 'USB 串口',
+    stack: '设备状态栈', unknown: '未知', response: '响应正常',
+    hardware: ['固件版本', '主控型号', '芯片温度', 'MAC 地址', 'IP 地址', 'Wi-Fi', '信号强度'],
+    unreported: '未上报', network: '网络与配网', scan: '搜索 SSID', scanning: '搜索中…', scanEmpty: '未发现可用网络，请靠近路由器后重新搜索。', scanUnsupported: '此固件不支持搜索网络，请使用设备热点配网。', scanFailed: '搜索未完成，请重试。', scanSelect: '选择搜索到的网络', provisioning: '配网中…', band: '工作频段', channel: '信道', open: '开放网络', passwordRequired: '需要密码', scanAuthUnsupported: '暂不支持此安全类型', signalLevels: ['信号未知', '信号较弱', '信号一般', '信号强'],
+    wifiErrors: { VERIFY_FAILED: '连接验证失败，请检查网络名称、密码和信号', STORAGE_FAILED: '设备未能保存网络配置', UNSUPPORTED: '当前固件不支持此操作', BUSY: '设备正在处理其他网络任务', INVALID_ARGUMENT: '网络名称或密码格式不正确' },
+    precise: '精确数值调整', dragShape: '拖动图形移动，拖动顶点或方形手柄调整大小。',
+    dragPose: '拖动彩色手柄调整位置、高度和姿态。', handles: ['位置 XY', '高度 Z', '偏航', '俯仰', '横滚'],
+    resize: '缩放', move: '移动', vertex: '顶点', selectArea: '编辑区域',
     waiting: '等待设备', data: '雷达数据', config: '设备配置', unread: '未读取', readable: '已读取',
     pose: '方向校准', poseHint: '设置安装位置与朝向，让雷达坐标与房间对齐。',
     boundary: '边界过滤', boundaryHint: '边界外目标仍可查看，不计入边界内判断。',
@@ -41,7 +48,14 @@ export const presentation = {
   en: {
     title: 'Device console', intro: 'Connect over USB to view radar data or configure your device.', advanced: 'Advanced mode',
     empty: 'Connect a device to start observing', emptyHint: 'No radar selection required.',
-    physical: 'Connection layer', protocol: 'Protocol layer', application: 'Application layer', usb: 'USB serial',
+    physical: 'Serial layer', protocol: 'Protocol layer', controller: 'Controller layer', radarLayer: 'Radar layer', usb: 'USB serial',
+    stack: 'Device stack', unknown: 'Unknown', response: 'Responding',
+    hardware: ['Firmware', 'Controller model', 'Chip temperature', 'MAC address', 'IP address', 'Wi-Fi', 'Signal strength'],
+    unreported: 'Not reported', network: 'Network & Wi-Fi setup', scan: 'Search SSIDs', scanning: 'Searching…', scanEmpty: 'No visible networks. Move closer to the router and search again.', scanUnsupported: 'This firmware cannot scan. Use the device hotspot to set up Wi-Fi.', scanFailed: 'Search incomplete. Please retry.', scanSelect: 'Choose a discovered network', provisioning: 'Connecting…', band: 'Frequency band', channel: 'Channel', open: 'Open network', passwordRequired: 'Password required', scanAuthUnsupported: 'Unsupported security type', signalLevels: ['Unknown signal', 'Weak signal', 'Fair signal', 'Strong signal'],
+    wifiErrors: { VERIFY_FAILED: 'Connection verification failed; check SSID, password and signal', STORAGE_FAILED: 'The device could not save network settings', UNSUPPORTED: 'This firmware does not support the operation', BUSY: 'The device is processing another network task', INVALID_ARGUMENT: 'Check the SSID and password format' },
+    precise: 'Precise values', dragShape: 'Drag the shape to move it; drag vertices or the square handle to resize.',
+    dragPose: 'Drag the colored handles to change position, height and orientation.', handles: ['Position XY', 'Height Z', 'Yaw', 'Pitch', 'Roll'],
+    resize: 'Resize', move: 'Move', vertex: 'Vertex', selectArea: 'Edit area',
     waiting: 'Waiting for device', data: 'Radar data', config: 'Device configuration', unread: 'Not read', readable: 'Loaded',
     pose: 'Orientation', poseHint: 'Align radar coordinates with the room using installation position and orientation.',
     boundary: 'Boundary filter', boundaryHint: 'Outside targets remain visible but do not count as inside the boundary.',
@@ -82,13 +96,20 @@ export function savedConfig(snapshot) {
   return Object.fromEntries((snapshot.configItems || []).map(({ key, value }) => [key, value]));
 }
 
-export function stackStatus(snap, t, u) {
+export function stackStatus(snap, t, u, view = {}) {
   const label = (value) => u.statusValues[value] || t.states[value] || value;
-  const live = snap.sessionLive && snap.layers.protocol === 'online';
+  const port = snap.layers.port === 'open';
+  const live = port && snap.sessionLive && snap.layers.protocol === 'online';
+  const controller = live && !!snap.identity && Number.isFinite(snap.status?.uptime_ms);
+  const radar = controller && ['present','absent'].includes(view.presence) && ['healthy','partial'].includes(snap.layers.radar);
+  const identity = snap.identity || {};
+  const upper = value => typeof value === 'string' && value ? value.toUpperCase() : u.unreported;
+  const version = identity.protocol;
+  const protocol = Number.isInteger(version?.major) && Number.isInteger(version?.minor) ? `MWCP ${version.major}.${version.minor}` : identity.host_protocol || u.unreported;
   return [
-    { label: u.physical, value: label(snap.layers.port), detail: u.usb, good: snap.layers.port === 'open' },
-    { label: u.protocol, value: label(snap.layers.protocol), detail: 'MWCP', good: live },
-    { label: u.application, value: live ? (snap.layers.data === 'none' ? label('none') : t.states[snap.layers.data] || label(snap.layers.data)) : u.waiting,
-      detail: u.data + ' · ' + u.config + ': ' + (live && snap.configRevision != null ? u.readable : u.unread), good: live && snap.layers.data === 'valid' },
+    { id: 'serial', label: u.physical, value: label(snap.layers.port), detail: u.usb, good: port },
+    { id: 'protocol', label: u.protocol, value: live ? label('online') : (port ? label(snap.layers.protocol) : u.waiting), detail: protocol, good: live },
+    { id: 'controller', label: u.controller, value: controller ? u.response : u.waiting, detail: `${upper(identity.chip_model)} · ${identity.firmware_version || u.unreported}`, good: controller },
+    { id: 'radar', label: u.radarLayer, value: controller ? t.states[view.presence] || u.unknown : u.waiting, detail: upper(identity.configured_model), good: radar },
   ];
 }

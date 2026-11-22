@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import RadarScene from './RadarScene.jsx';
+import InstallationScene from './InstallationScene.jsx';
 
 const fields = [
   ['install.x_cm', 'cm', -2000, 2000, 1], ['install.y_cm', 'cm', -2000, 2000, 1],
@@ -23,22 +24,29 @@ export function PolygonEditor({ u, value, onChange, max = 64 }) {
 
 export default function ConfigPanels({ t, u, session, snap, locked }) {
   const [panel, setPanel] = useState('pose');
+  const [areaSlot, setAreaSlot] = useState(0);
   const draft = snap.draft || {};
   const edit = (key, value) => session.editDraft(key, value);
   const writable = (key) => session.supports(key) && session.feature(key)?.writable === true;
   const areas = Array.isArray(draft['areas.definitions']) ? draft['areas.definitions'] : [];
   const maxAreas = Math.min(3, session.feature('areas.definitions')?.max_items ?? 3);
   const updateArea = (slot, changes) => edit('areas.definitions', areas.map((a) => a.slot === slot ? {...a,...changes} : a));
+  const selectedSlot = areas.some(a=>a.slot===areaSlot)?areaSlot:areas[0]?.slot;
+  const editKey = panel === 'boundary' ? 'geometry.boundary_cm' : 'areas.definitions';
   const prefix = panel === 'areas' ? 'areas.definitions' : 'geometry.boundary_cm';
   const error = Object.entries(snap.fieldErrors).filter(([key]) => key.startsWith(prefix) || (panel === 'boundary' && key.startsWith('range.window_cm'))).map(([,message]) => message).join(' · ');
   return <>
     <div className="mb-5 flex flex-wrap gap-2" role="tablist" aria-label={t.tabs.config}>{['pose','boundary','areas'].map((key) => <button key={key} role="tab" aria-selected={panel === key} className={panel === key ? 'primary-button' : 'secondary-button'} onClick={() => setPanel(key)}>{u[key]}</button>)}</div>
-    <div className="grid items-start gap-5 lg:grid-cols-2">
+    <div className="grid items-start gap-5">
+      {panel === 'pose' ? <InstallationScene key={snap.generation} config={draft} u={u} locked={locked} writable={writable} feature={key=>session.feature(key)} onEdit={edit}/> : <>
+        {panel==='areas' && areas.length>0 && <label className="text-sm">{u.selectArea}<select className="field ml-2" value={selectedSlot} onChange={e=>setAreaSlot(Number(e.target.value))}>{areas.map(a=><option key={a.slot} value={a.slot}>{a.name||u.area+' '+(a.slot+1)}</option>)}</select></label>}
+        <RadarScene key={snap.generation+':'+panel+':'+selectedSlot} config={draft} u={u} preview={Object.keys(session.localChanges()).length>0} locked={locked || !writable(editKey)} editable={{kind:panel==='boundary'?'boundary':'area',slot:selectedSlot}} onPolygonChange={points=>panel==='boundary'?edit(editKey,points):updateArea(selectedSlot,{points_cm:points})}/>
+      </>}
       <fieldset disabled={locked} className="min-w-0 space-y-4 disabled:opacity-60">
         <legend className="mb-2 font-semibold">{u[panel]}</legend><p className="muted text-sm">{u[panel+'Hint']}</p>
         {panel === 'pose' && <>
           {!fields.some(([key]) => writable(key)) && <p className="muted text-sm">{u.unsupported}</p>}
-          <div className="grid grid-cols-2 gap-3">{fields.map(([key, unit, min, max, step], i) => writable(key) && <label key={key} className="text-sm font-semibold">{u.positions[i]} ({t.units[unit]})<input className="field mt-2" type="number" min={min} max={max} step={step} aria-invalid={!!snap.fieldErrors[key]} value={draft[key] ?? ''} onChange={(e) => edit(key,valueOf(e.target.value))}/>{snap.fieldErrors[key] && <span role="alert" className="text-xs text-red-600">{snap.fieldErrors[key]}</span>}</label>)}</div>
+          <details className="soft-surface p-4"><summary className="cursor-pointer text-sm font-semibold">{u.precise}</summary><div className="mt-4 grid grid-cols-2 gap-3">{fields.map(([key, unit, min, max, step], i) => writable(key) && <label key={key} className="text-sm font-semibold">{u.positions[i]} ({t.units[unit]})<input className="field mt-2" type="number" min={min} max={max} step={step} aria-invalid={!!snap.fieldErrors[key]} value={draft[key] ?? ''} onChange={(e) => edit(key,valueOf(e.target.value))}/>{snap.fieldErrors[key] && <span role="alert" className="text-xs text-red-600">{snap.fieldErrors[key]}</span>}</label>)}</div></details>
           {writable('install.yaw_deg') && <label className="block text-sm">{u.positions[3]} · {draft['install.yaw_deg'] ?? 0}°<input className="mt-3 w-full accent-emerald-600" type="range" min="-180" max="180" step="1" value={draft['install.yaw_deg'] ?? 0} onChange={(e) => edit('install.yaw_deg',Number(e.target.value))}/></label>}
         </>}
         {panel === 'boundary' && <>
@@ -49,18 +57,17 @@ export default function ConfigPanels({ t, u, session, snap, locked }) {
         </>}
         {panel === 'areas' && (writable('areas.definitions') ? <>
           {!areas.length && <p className="muted text-sm">{u.noAreas}</p>}
-          {areas.map((a) => <div className="soft-surface space-y-3 p-4" key={a.slot}>
+          {areas.filter(a=>a.slot===selectedSlot).map((a) => <div className="soft-surface space-y-3 p-4" key={a.slot}>
             <label className="check-row"><input type="checkbox" checked={a.enabled} onChange={(e) => updateArea(a.slot,{enabled:e.target.checked})}/>{u.area} {a.slot+1} · {u.enabled}</label>
             <label className="block text-sm">{u.name}<input className="field mt-2" value={a.name} onChange={(e) => updateArea(a.slot,{name:e.target.value})}/></label>
             <PolygonEditor u={u} value={a.points_cm} max={12} onChange={(v) => updateArea(a.slot,{points_cm:v})}/>
             <button className="secondary-button" onClick={() => edit('areas.definitions',areas.filter((n) => n.slot !== a.slot))}>{u.removeArea}</button>
           </div>)}
-          <button className="secondary-button" disabled={areas.length >= maxAreas} onClick={() => { const slot = Array.from({length:maxAreas},(_,i) => i).find((i) => !areas.some((a) => a.slot === i)); if (slot != null) edit('areas.definitions',areas.concat([{slot,enabled:true,name:u.area+' '+(slot+1),points_cm:rectangle()}])); }}>{u.addArea}</button>
+          <button className="secondary-button" disabled={areas.length >= maxAreas} onClick={() => { const slot = Array.from({length:maxAreas},(_,i) => i).find((i) => !areas.some((a) => a.slot === i)); if (slot != null) { edit('areas.definitions',areas.concat([{slot,enabled:true,name:u.area+' '+(slot+1),points_cm:rectangle()}])); setAreaSlot(slot); } }}>{u.addArea}</button>
           <p className="muted text-xs">{u.areaStatus}</p>
         </> : <p className="muted text-sm">{u.unsupported}</p>)}
         {panel !== 'pose' && error && <p role="alert" className="text-sm text-red-600">{t.fieldError}: {error}</p>}
       </fieldset>
-      <RadarScene config={draft} u={u} preview={Object.keys(session.localChanges()).length > 0}/>
     </div>
   </>;
 }

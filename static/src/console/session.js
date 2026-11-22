@@ -62,6 +62,7 @@ export class ConsoleSession {
     this.wifi = null;
     this.wifiTask = null;
     this.wifiTimer = null;
+    this.wifiScan = null;
     this.actions = [];
     this.jobs = [];
     this.lastError = null;
@@ -162,6 +163,7 @@ export class ConsoleSession {
       logs: this.logs.slice(),
       status: this.status,
       wifi: this.wifi ? redact(this.wifi) : null,
+      wifiScan: this.wifiScan ? { ...this.wifiScan, items: this.wifiScan.items.slice() } : null,
       wifiTask: this.wifiTask ? { phase: this.wifiTask.phase, jobId: this.wifiTask.jobId, opId: this.wifiTask.opId, reason: this.wifiTask.reason || null } : null,
       actions: this.actions,
       jobs: this.jobs,
@@ -240,6 +242,11 @@ export class ConsoleSession {
       const subscribed = await this.subscribe();
       if (!subscribed) throw new Error('subscribe_failed');
       try { await this.refreshStatus(); } catch { /* status is not required to view identity */ }
+      try {
+        const frame = await this.ownedRequest({ client: this.client, generation, bootId: this.bootId }, CODE.DEVICE_INFO, {});
+        if (generation !== this.generation) return { ok: false, reason: 'stale_generation' };
+        if (frame.json?.ok) this.mergeDeviceInfo(frame.json.result);
+      } catch { /* Optional identity details do not block live observations. */ }
       this.client.startHeartbeat();
       this.emit();
       return { ok: true, identity: this.identity, simulation: this.mode !== 'hardware' };
@@ -783,6 +790,31 @@ export class ConsoleSession {
     this.wifiTimer = null;
   }
 
+  async refreshHardware() {
+    const owner = { client: this.client, generation: this.generation, bootId: this.bootId };
+    if (!this.wifiOwned(owner.generation, owner.bootId)) return;
+    for (const code of [CODE.DEVICE_INFO, CODE.STATUS_GET]) {
+      const frame = await this.ownedRequest(owner, code, {});
+      if (!this.wifiOwned(owner.generation, owner.bootId) || this.client !== owner.client) return;
+      if (frame.json?.ok) {
+        if (code === CODE.DEVICE_INFO) this.mergeDeviceInfo(frame.json.result);
+        else this.status = redact(frame.json.result);
+        this.emit();
+      }
+    }
+    if (this.wifiOwned(owner.generation, owner.bootId) && this.client === owner.client) await this.refreshWifi();
+  }
+
+  mergeDeviceInfo(info) {
+    // HELLO remains the identity authority used by pending-write protection.
+    if (!info || info.device_id !== this.identity?.device_id || info.boot_id !== this.bootId) return;
+    const details = {};
+    for (const key of ['chip_model','temperature_c','mac_address','host_protocol','build_profile','git_sha','release_channel']) {
+      if (Object.hasOwn(info,key)) details[key] = info[key];
+    }
+    this.identity = { ...this.identity, ...redact(details) };
+  }
+
   wifiOwned(generation, bootId) {
     return Boolean(this.client && this.client.sessionLive && this.generation === generation && this.client.bootId === bootId);
   }
@@ -841,7 +873,7 @@ export class ConsoleSession {
       }
       this.jobs = mergeJob(this.jobs, Object.assign({}, job, { verified: job.state === 'succeeded' }));
       const terminal = job.state === 'succeeded' || job.state === 'failed';
-      this.wifiTask = { opId: job.op_id || task.opId, jobId: job.job_id, phase: terminal ? job.state : 'accepted', bootId, polls: this.wifiTask.polls, reason: null };
+      this.wifiTask = { opId: job.op_id || task.opId, jobId: job.job_id, phase: terminal ? job.state : 'accepted', bootId, polls: this.wifiTask.polls, reason: job.error?.code || job.error?.message || null };
       if (terminal) {
         this.clearWifiTimer();
         await this.refreshWifi();
@@ -900,7 +932,76 @@ export class ConsoleSession {
     return this.wifi;
   }
 
+  async scanWifi() {
+    if (!this.client?.sessionLive) return { ok: false, reason: 'offline' };
+    if (this.wifiScan?.phase === 'scanning' || (this.wifiTask && !['succeeded','failed'].includes(this.wifiTask.phase))) return { ok: false, reason: 'provision_busy' };
+    if (this.capabilities.some(item => ['wifi','wifi.scan'].includes(item.id) && item.supported === false)) {
+      this.wifiScan = { phase: 'failed', reason: 'UNSUPPORTED', items: [] };
+      this.emit();
+      return { ok: false, reason: 'UNSUPPORTED' };
+    }
+    if (this.client.inflight()) return { ok: false, reason: 'rpc_inflight' };
+    const owner = { client: this.client, generation: this.generation, bootId: this.bootId };
+    const opId = newOpId();
+    const owned = () => this.client === owner.client && this.wifiOwned(owner.generation, owner.bootId) && this.wifiScan?.opId === opId;
+    this.wifiScan = { phase: 'scanning', opId, items: [], reason: null };
+    this.emit();
+    const read = async (code, body) => {
+      // Only reads may wait/retry around another RPC. Never replay WIFI_SCAN.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (!owned()) throw new Error('session_changed');
+        if (owner.client.inflight()) { await this.wait(350); continue; }
+        try { return await this.ownedRequest(owner, code, body); }
+        catch (error) { if (error.message !== 'rpc_inflight') throw error; }
+      }
+      throw new Error('rpc_inflight');
+    };
+    const result = frame => {
+      if (!frame?.json?.ok) throw new Error(frame?.json?.error?.code || 'scan_failed');
+      return frame.json.result;
+    };
+    try {
+      const started = result(await this.ownedRequest(owner, CODE.WIFI_SCAN, { op_id: opId }, { retry: false }));
+      if (!owned()) return { ok: false, reason: 'session_changed' };
+      if (!started?.job_id) throw new Error('invalid_scan_job');
+      this.wifiScan.jobId = started.job_id;
+      let complete = false;
+      for (let poll = 0; poll < 20; poll++) {
+        const job = result(await read(CODE.JOB_GET, { job_id: started.job_id }));
+        if (job.job_id !== started.job_id || job.op_id !== opId || job.action_id !== 'wifi.scan') throw new Error('invalid_scan_job');
+        if (job.state === 'failed') throw new Error(job.error?.code || 'scan_failed');
+        if (job.state === 'succeeded') { complete = true; break; }
+        await this.wait(700);
+      }
+      if (!complete) throw new Error('scan_timeout');
+      const items = [], seen = new Set();
+      let cursor = null, truncated = false;
+      for (let page = 0; page < 64; page++) {
+        const data = result(await read(CODE.WIFI_SCAN_RESULTS, { job_id: started.job_id, cursor }));
+        if (!Array.isArray(data.items)) throw new Error('invalid_scan_results');
+        items.push(...data.items);
+        truncated ||= data.truncated === true;
+        if (items.length > 64) throw new Error('invalid_scan_results');
+        cursor = data.next_cursor;
+        if (!cursor) break;
+        if (seen.has(cursor) || page === 63) throw new Error('invalid_scan_cursor');
+        seen.add(cursor);
+      }
+      if (!owned()) return { ok: false, reason: 'session_changed' };
+      this.wifiScan = { ...this.wifiScan, phase: 'ready', items: items.filter(item => typeof item.ssid === 'string' && item.ssid.length > 0).sort((a,b) => b.rssi_dbm-a.rssi_dbm), truncated };
+      this.emit();
+      await this.refreshWifi();
+      return { ok: true };
+    } catch (error) {
+      if (!owned()) return { ok: false, reason: 'session_changed' };
+      this.wifiScan = { ...this.wifiScan, phase: 'failed', reason: error.message, items: [] };
+      this.emit();
+      return { ok: false, reason: error.message };
+    }
+  }
+
   async provisionWifi(input) {
+    if (this.wifiScan?.phase === 'scanning') return { ok: false, reason: 'provision_busy' };
     if (this.save.phase === SAVE.unknown) return { ok: false, reason: 'pending_save' };
     if (this.wifi && this.wifi.state === 'unsupported' && this.wifi.current) return { ok: false, reason: 'unsupported' };
     if (this.wifiTask && (this.wifiTask.phase === 'submitting' || this.wifiTask.phase === 'accepted' || this.wifiTask.phase === 'running' || this.wifiTask.phase === 'querying' || (this.wifiTask.phase === 'unknown' && (this.wifiTask.opId || this.wifiTask.jobId)))) {
@@ -998,6 +1099,7 @@ export class ConsoleSession {
     if (!includeNetwork && wifi) {
       wifi.ssid = wifi.ssid ? '[hidden]' : wifi.ssid;
       wifi.ip = wifi.ip ? '[hidden]' : wifi.ip;
+      for (const key of ['mac_address','bssid']) if (wifi[key]) wifi[key] = '[hidden]';
     }
     const identity = this.identity ? {
       configured_model: this.identity.configured_model,
@@ -1048,6 +1150,7 @@ export class ConsoleSession {
     if (this.wifi) this.wifi = Object.assign({}, this.wifi, { current: false, historical: true });
     this.wifiTask = null;
     this.transport = null;
+    this.wifiScan = null;
     this.detach = null;
     this.layers = Object.assign({}, this.layers, {
       port: 'closed',

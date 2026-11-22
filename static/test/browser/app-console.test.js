@@ -67,7 +67,7 @@ test('production app connects, saves, and keeps one port owner', async () => {
     });
     // Console connection has no dependency on an installer model or board selection.
     await clickExact(socket, '连接设备');
-    await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'r60abd1' });
+    await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'MWCP 1.0' });
     assert.equal(await evaluate(socket, `document.querySelector('#console [role="tab"][aria-selected="true"]').textContent`), '实时数据');
     await clickExact(socket, '断开');
     await waitConsole(socket, '连接设备');
@@ -85,7 +85,7 @@ test('production app connects, saves, and keeps one port owner', async () => {
     assert.doesNotMatch(await text(socket), /烧录成功/);
 
     await clickExact(socket, '连接设备');
-    const connected = await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'r60abd1' });
+    const connected = await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'MWCP 1.0' });
     assert.match(connected, /R60ABD1/);
     assert.match(connected, /关闭安装窗口不等于端口已经释放/);
     const held = await flashState(socket);
@@ -133,7 +133,7 @@ test('production app connects, saves, and keeps one port owner', async () => {
 
     await evaluate(socket, `window.__mwcp.device.bumpExternal('install.y_cm', 88)`);
     await clickExact(socket, '连接设备');
-    await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'r60abd1' });
+    await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'MWCP 1.0' });
     await clickExact(socket, '配置');
     let adopted = await readFields(socket);
     for (let i = 0; i < 30 && adopted.y !== '88'; i++) {
@@ -149,7 +149,7 @@ test('production app connects, saves, and keeps one port owner', async () => {
     await waitConsole(socket, '连接设备');
     await evaluate(socket, `window.__mwcp.device.bumpExternal('install.y_cm', 77)`);
     await clickExact(socket, '连接设备');
-    await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'r60abd1' });
+    await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'MWCP 1.0' });
     await clickExact(socket, '配置');
     await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '设备配置已被其他入口修改' });
     const kept = await readFields(socket);

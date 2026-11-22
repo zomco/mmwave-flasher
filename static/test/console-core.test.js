@@ -73,6 +73,112 @@ function dropNextCommit(device) {
   };
 }
 
+test('hardware panel reads real protocol responses without writing device configuration', async () => {
+  const box=await online();
+  box.session.rpcAt=[];
+  const writes=box.device.writeCount;
+  await box.session.refreshHardware();
+  assert.equal(box.session.identity.host_protocol,'MWCP/1');
+  assert.equal(box.session.identity.chip_model,undefined);
+  assert.ok(Number.isFinite(box.session.status.uptime_ms));
+  assert.equal(box.session.wifi.current,true);
+  assert.equal(box.device.writeCount,writes);
+  await box.session.stop();
+});
+
+test('SSID scan follows its own job, reads all pages, and never writes credentials', async () => {
+  const box = await online();
+  box.session.rpcAt = [];
+  const original = box.device.wifiScan.bind(box.device);
+  let starts = 0;
+  box.device.wifiScan = (...args) => {
+    starts++;
+    const response = original(...args);
+    box.device.advanceJob(response.result.job_id, 'succeeded');
+    return response;
+  };
+  const result = await box.session.scanWifi();
+  assert.equal(result.ok,true);
+  assert.equal(starts,1);
+  const scan = box.session.snapshot().wifiScan;
+  assert.equal(scan.phase,'ready');
+  assert.equal(scan.items.length,box.device.scanItems.filter(i=>i.ssid).length);
+  assert.ok(scan.items.every((item,i)=>!i || scan.items[i-1].rssi_dbm >= item.rssi_dbm));
+  assert.equal(box.device.writeCount,0);
+  assert.equal(box.session.wifiTask,null);
+  await box.session.stop();
+});
+
+test('SSID scan unsupported and timeouts are bounded, not empty successful scans', async () => {
+  const box = await online();
+  box.session.capabilities.push({id:'wifi.scan',supported:false});
+  assert.equal((await box.session.scanWifi()).reason,'UNSUPPORTED');
+  assert.equal(box.device.activeJobs.size,0);
+  box.session.capabilities.pop();
+  box.session.rpcAt = [];
+  assert.equal((await box.session.scanWifi()).reason,'scan_timeout');
+  assert.equal(box.session.wifiScan.phase,'failed');
+  assert.deepEqual(box.session.wifiScan.items,[]);
+  assert.equal(box.device.activeJobs.size,1);
+  await box.session.stop();
+});
+
+test('old scan completion cannot populate a newly attached device', async () => {
+  const box = await online();
+  box.session.rpcAt=[];
+  box.device.faults.delayMs=60000;
+  const pending = box.session.scanWifi();
+  await micro();
+  await box.session.stop();
+  box.device.faults.delayMs=0;
+  await box.session.attach(box.transport,{mode:'simulation'});
+  assert.equal((await pending).reason,'session_changed');
+  assert.equal(box.session.wifiScan,null);
+  await box.session.stop();
+});
+
+test('failed provisioning keeps the device failure reason and refreshed network status', async () => {
+  const box = await online();
+  box.session.rpcAt=[];
+  const accepted = await box.session.provisionWifi({ssid:'Guest',auth:'open',password:''});
+  assert.equal(accepted.ok,true);
+  box.device.advanceJob(accepted.job_id,'failed',{error:{code:'VERIFY_FAILED',message:'Authentication failed'}});
+  await box.session.queryWifiTask();
+  assert.equal(box.session.wifiTask.phase,'failed');
+  assert.equal(box.session.wifiTask.reason,'VERIFY_FAILED');
+  assert.equal(box.session.wifi.state,'disconnected');
+  await box.session.stop();
+});
+
+test('optional device and network metadata remain truthful and private by default', async () => {
+  const box = await online();
+  box.session.mergeDeviceInfo({device_id:box.session.identity.device_id,boot_id:box.session.bootId,chip_model:'esp32c3',mac_address:'00:11:22:33:44:55'});
+  assert.equal(box.session.identity.chip_model,'esp32c3');
+  box.device.wifi={state:'connected',ssid:'Lab',ip:'192.168.1.50',rssi_dbm:-40,last_error:null,mac_address:'00:11:22:33:44:55',band:'2.4 GHz',channel:6};
+  box.session.rpcAt=[];
+  await box.session.refreshWifi();
+  assert.equal(box.session.wifi.channel,6);
+  assert.equal(box.session.diagnosticExport().wifi.mac_address,'[hidden]');
+  assert.equal(box.session.diagnosticExport({includeNetwork:true}).wifi.mac_address,'00:11:22:33:44:55');
+  await box.session.stop();
+});
+
+test('hardware refresh cannot apply an old response to another session', async () => {
+  const box=await online();
+  box.session.rpcAt=[];
+  box.device.faults.delayMs=60000;
+  const read=box.session.refreshHardware().catch(error=>error.message);
+  await micro();
+  await box.session.stop();
+  box.device.faults.delayMs=0;
+  await box.session.attach(box.transport,{mode:'simulation'});
+  const identity = { ...box.session.identity };
+  await read;
+  assert.deepEqual(box.session.identity,identity,'old DEVICE_INFO must not update the new identity');
+  assert.equal(box.session.wifi,null);
+  await box.session.stop();
+});
+
 function swallowNextCommit(session, device) {
   const ingest = device.ingest.bind(device);
   let skip = false;
