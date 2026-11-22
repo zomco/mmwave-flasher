@@ -13,7 +13,7 @@
     "postinstall": "node script/apply-installer-download-guard.mjs"
   },
   "dependencies": {
-    "esp-web-tools": "^10.5.2",
+    "esp-web-tools": "10.4.0",
     "lucide-react": "^1.75.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

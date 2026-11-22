@@ -13,6 +13,8 @@
 
 ## 日常更新
 
+- `esp-web-tools` 固定为已验证的 `10.4.0`。烧录下载保护补丁依赖该包的源码与打包结构；`10.5.2` 缺少 `src/flash.ts`，不能直接升级。后续升级必须单独适配补丁并通过空下载拒绝、擦写前保护及浏览器回归，不能跳过 postinstall 保护来恢复部署。
+
 - 网页 main 推送触发网页检查与 Pages；授权推送前应明确包含关联部署。
 - 发布新固件仍在 mmwave-component 手动运行 Publish。发布成功后在 **mmwave-flasher** 手动运行 Publish GitHub Pages，刷新同一网页候选的版本目录。不同仓库的 workflow_run 不作自动连接。
 - Node 24 + npm ci；运行契约检查、Python 组装测试、JS 单元和浏览器测试及生产构建。Pages 只读下载组件 Release，使用 GITHUB_TOKEN，无跨仓库写 PAT。

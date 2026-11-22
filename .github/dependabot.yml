@@ -48,6 +48,10 @@ updates:
           - "patch"
       npm-production:
         dependency-type: "production"
+        # The installer download guard patches exact upstream artifacts.
+        # Review installer upgrades separately with the guard regression tests.
+        exclude-patterns:
+          - "esp-web-tools"
         update-types:
           - "minor"
           - "patch"
