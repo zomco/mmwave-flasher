@@ -112,7 +112,7 @@ test('a checked Beta manifest can flash only while the port is free', async () =
 
     await socket.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await clickExact(socket, '配置');
-    await setField(socket, 'X (', '31');
+    await setField(socket, 'X 位置 (', '31');
     await waitEnabled(socket, '保存到设备');
     const saveBox = await controlBox(socket, '保存到设备');
     const disconnectBox = await controlBox(socket, '断开');

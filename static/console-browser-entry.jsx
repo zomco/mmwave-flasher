@@ -5,6 +5,7 @@ import { ConsoleSession } from './src/console/session.js';
 import { createClock } from './src/protocol/clock.js';
 import { ProtocolClient } from './src/protocol/client.js';
 import { SimulatedDevice, observation } from './src/protocol/simulator.js';
+import './src/index.css';
 
 const clock = createClock(5000);
 const device = new SimulatedDevice({ profile: 'r60', clock });

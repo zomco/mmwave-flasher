@@ -65,6 +65,12 @@ test('production app connects, saves, and keeps one port owner', async () => {
       deviceScaleFactor: 1,
       mobile: false,
     });
+    // Console connection has no dependency on an installer model or board selection.
+    await clickExact(socket, '连接设备');
+    await waitForText(socket, { timeoutMs: 8000, commandTimeoutMs: 1000, match: 'r60abd1' });
+    assert.equal(await evaluate(socket, `document.querySelector('#console [role="tab"][aria-selected="true"]').textContent`), '实时数据');
+    await clickExact(socket, '断开');
+    await waitConsole(socket, '连接设备');
     await click(socket, 'R60ABD1');
     await click(socket, '继续');
     await click(socket, 'ESP32-C3 Super Mini');
@@ -98,8 +104,8 @@ test('production app connects, saves, and keeps one port owner', async () => {
     await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '报告有人' });
 
     await clickExact(socket, '配置');
-    await setField(socket, 'X (', '31');
-    await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: 'install.x_cm' });
+    await setField(socket, 'X 位置 (', '31');
+    await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '将写入的变化' });
     const onlyX = await evaluate(socket, `[...document.querySelectorAll('#console li code')].map((item) => item.textContent).join(',')`);
     assert.equal(onlyX, 'install.x_cm');
     await click(socket, '在设备上验证');
@@ -117,7 +123,7 @@ test('production app connects, saves, and keeps one port owner', async () => {
     await clickExact(socket, '断开');
     await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '正在释放端口' });
     await waitConsole(socket, '连接设备');
-    await clickExact(socket, '快速验证');
+    await clickExact(socket, '实时数据');
     await waitForText(socket, { timeoutMs: 5000, commandTimeoutMs: 1000, match: '历史样本' });
     const released = await text(socket);
     assert.match(released, /已过期/);
@@ -136,7 +142,7 @@ test('production app connects, saves, and keeps one port owner', async () => {
     }
     assert.equal(adopted.x, '31');
     assert.equal(adopted.y, '88');
-    await setField(socket, 'X (', '32');
+    await setField(socket, 'X 位置 (', '32');
     const dirty = await evaluate(socket, `[...document.querySelectorAll('#console li code')].map((item) => item.textContent).join(',')`);
     assert.equal(dirty, 'install.x_cm');
     await clickExact(socket, '断开');
@@ -155,13 +161,13 @@ test('production app connects, saves, and keeps one port owner', async () => {
     })()`);
     assert.equal(saveDisabled, true);
     await click(socket, '重新读取设备');
-    await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '没有未保存的修改' });
+    await waitForText(socket, { timeoutMs: 3000, commandTimeoutMs: 1000, match: '待命' });
     const reloaded = await readFields(socket);
     assert.equal(reloaded.x, '31');
     assert.equal(reloaded.y, '77');
     const afterReload = await text(socket);
     assert.doesNotMatch(afterReload, /设备配置已被其他入口修改/);
-    await setField(socket, 'X (', '34');
+    await setField(socket, 'X 位置 (', '34');
     await click(socket, '在设备上验证');
     await waitEnabled(socket, '保存到设备');
     await click(socket, '保存到设备');
@@ -265,6 +271,7 @@ async function waitConsole(cdp, label, timeoutMs = 8000) {
 }
 
 async function click(cdp, label) {
+  if (label === '在设备上验证') await evaluate(cdp, `(() => { const el = [...document.querySelectorAll('summary')].find((el) => el.textContent === '更多操作'); if (el && !el.parentElement.open) el.click(); })()`);
   const result = await evaluate(cdp, `(() => {
     const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes(${JSON.stringify(label)}));
     if (!button) return 'missing';
@@ -306,7 +313,7 @@ function readFields(cdp) {
       const field = [...document.querySelectorAll('#console label')].find((item) => item.textContent.trim().startsWith(label));
       return field && field.querySelector('input') ? field.querySelector('input').value : 'missing';
     };
-    return { x: value('X ('), y: value('Y (') };
+    return { x: value('X 位置 ('), y: value('Y 位置 (') };
   })()`);
 }
 

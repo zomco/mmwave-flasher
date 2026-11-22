@@ -1,8 +1,10 @@
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   base: './',
+  plugins: [tailwindcss()],
   resolve: {
     alias: {
       'node:crypto': resolve('test/browser/sha256-shim.js'),

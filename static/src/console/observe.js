@@ -124,7 +124,8 @@ export function targetRows(body, boundary) {
     const oneD = Object.prototype.hasOwnProperty.call(target, 'range_cm');
     let outside = target.boundary === 'outside';
     if (!oneD && boundary && Array.isArray(boundary) && boundary.length >= 3 && Array.isArray(target.room_cm)) {
-      outside = pointInPolygon(target.room_cm[0], target.room_cm[1], boundary) === false;
+      const polygon = boundary.map((p) => Array.isArray(p) ? { x: p[0], y: p[1] } : p);
+      outside = pointInPolygon(target.room_cm[0], target.room_cm[1], polygon) === false;
     }
     return {
       key: String(target.id != null ? target.id : index),
